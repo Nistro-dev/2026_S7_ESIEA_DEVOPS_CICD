@@ -1,31 +1,28 @@
-# WordPress CI/CD - ESIEA DevOps 2026
+# Flask API - Pipeline CI
 
+Application Flask avec pipeline CI utilisant GitHub Actions.
 
-## Architecture
+## Structure du projet
 
-- **WordPress** (Bitnami)
-- **MySQL 8.0**
-- **Docker Compose** pour le développement local
-- **Kubernetes** pour la production
-- **CI/CD** avec GitHub Actions
-- **Génération automatique** des manifests via Kompose
-
-## CI/CD Pipeline
-
-### Étapes
-
-1. **Validation** des manifests (docker-compose + kubernetes)
-2. **Tests** (WordPress + MySQL)
-3. **Génération des manifests** via Kompose
-4. **Upload sur FTP** OVH
-
-### Configuration des secrets GitHub
-
-Dans `Settings > Secrets and variables > Actions` :
-
-**Obligatoires** (pour l'upload FTP) :
 ```
-FTP_SERVER = ftp.cluster118.voh.com
-FTP_USERNAME = loudivuine
-FTP_PASSWORD = TempPass62
+.
+├── api.py              # Application Flask
+├── db.py              # Gestion de la base de données SQLite
+├── utils.py           # Fonctions utilitaires
+├── requirements.txt   # Dépendances Python
+├── tests/             # Tests unitaires
+│   └── test_api.py
+└── .github/
+    └── workflows/
+        └── ci.yml     # Pipeline d'intégration continue
 ```
+
+## Pipeline CI (Intégration Continue)
+
+Le workflow CI (`.github/workflows/ci.yml`) se déclenche automatiquement sur la branche `tp2` :
+
+**Actions automatiques** :
+- Vérification du code avec Ruff (linting)
+- Vérification des types avec mypy
+- Analyse de complexité avec Radon
+- Exécution des tests avec pytest et génération de coverage
