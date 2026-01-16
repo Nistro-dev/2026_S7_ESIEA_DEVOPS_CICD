@@ -10,6 +10,8 @@ Application Flask avec pipeline CI utilisant GitHub Actions.
 ├── db.py              # Gestion de la base de données SQLite
 ├── utils.py           # Fonctions utilitaires
 ├── requirements.txt   # Dépendances Python
+├── Dockerfile         # Image Docker
+├── docker-compose.yml # Configuration Docker Compose
 ├── tests/             # Tests unitaires
 │   └── test_api.py
 └── .github/
@@ -26,3 +28,4 @@ Le workflow CI (`.github/workflows/ci.yml`) se déclenche automatiquement sur la
 - Vérification des types avec mypy
 - Analyse de complexité avec Radon
 - Exécution des tests avec pytest et génération de coverage
+- Build et test de l'image Docker avec healthcheck

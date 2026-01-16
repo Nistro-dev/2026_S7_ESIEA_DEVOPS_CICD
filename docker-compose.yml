@@ -1,0 +1,24 @@
+services:
+  app:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: flask-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - app-data:/data
+    environment:
+      - APP_DB_PATH=/data/app.db
+      - FLASK_ENV=production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+volumes:
+  app-data:
+    driver: local
