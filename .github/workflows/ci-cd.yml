@@ -74,28 +74,91 @@ jobs:
       if: always()
       run: docker compose down -v
 
-  deploy:
-    name: Deploy via FTP
+  build-and-push-image:
+    name: Build and Push Docker Image to GHCR
     runs-on: ubuntu-latest
     needs: docker-test
+    if: github.ref == 'refs/heads/tp2' && github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata for Docker
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository }}/flask-api
+        tags: |
+          type=ref,event=branch
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+
+    - name: Image published
+      run: |
+        echo "Image published to ghcr.io/${{ github.repository }}/flask-api"
+        echo "Tags: ${{ steps.meta.outputs.tags }}"
+
+  generate-manifests:
+    name: Generate Kubernetes Manifests
+    runs-on: ubuntu-latest
+    needs: build-and-push-image
     if: github.ref == 'refs/heads/tp2' && github.event_name == 'push'
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Create deployment archive
+    - name: Install Kompose
       run: |
-        zip -r MichaudMaelPython.zip \
-          api.py \
-          db.py \
-          utils.py \
-          requirements.txt \
-          Dockerfile \
-          docker-compose.yml \
-          README.md
+        curl -L https://github.com/kubernetes/kompose/releases/download/v1.38.0/kompose-linux-amd64 -o kompose
+        chmod +x kompose
+        sudo mv kompose /usr/local/bin/
+
+    - name: Update docker-compose.yml with GHCR image
+      run: |
+        sed -i "s|build:|# build:|g" docker-compose.yml
+        sed -i "s|context: \.|# context: .|g" docker-compose.yml
+        sed -i "s|dockerfile: Dockerfile|# dockerfile: Dockerfile|g" docker-compose.yml
+        sed -i "/# build:/a\    image: ghcr.io/${{ github.repository }}/flask-api:tp2-${{ github.sha }}" docker-compose.yml
+        cat docker-compose.yml
+
+    - name: Generate Kubernetes manifests with Kompose
+      run: |
+        mkdir -p generated-manifests
+        kompose convert -f docker-compose.yml -o generated-manifests/
+        ls -la generated-manifests/
+
+    - name: Create deployment package
+      run: |
+        mkdir -p MichaudMael
+        cp generated-manifests/*.yaml MichaudMael/
+        cp docker-compose.yml MichaudMael/
+        cp README.md MichaudMael/ || true
         
-        echo "Archive créée: MichaudMaelPython.zip"
+        echo "Contenu du package:"
+        ls -la MichaudMael/
+        
+        zip -r MichaudMaelPython.zip MichaudMael/
         ls -lh MichaudMaelPython.zip
 
     - name: Upload to FTP
