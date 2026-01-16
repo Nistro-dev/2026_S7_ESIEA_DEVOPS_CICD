@@ -1,0 +1,158 @@
+name: WordPress CI/CD Pipeline
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  KUBECTL_VERSION: v1.35.0
+  KOMPOSE_VERSION: v1.38.0
+
+jobs:
+  # =====================================================
+  # 1. VALIDATION DES MANIFESTS
+  # =====================================================
+  validate-manifests:
+    name: Validation Kubernetes & Docker
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Valider docker-compose.yml
+        run: |
+          docker compose config --quiet
+
+      - name: Installer kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
+
+      - name: Installer Kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+
+      - name: Valider les manifests K8s
+        run: |
+          # Générer les manifests pour vérifier qu'il n'y a pas d'erreurs
+          kustomize build kube/ > manifests-test.yaml
+          echo "Manifests générés"
+
+          # Vérifier que le fichier n'est pas vide
+          if [ ! -s manifests-test.yaml ]; then
+            echo "manifests vide"
+            exit 1
+          fi
+
+  # =====================================================
+  # 2. TESTS DE L'APPLICATION
+  # =====================================================
+  integration-tests:
+    name: Tests d'intégration Docker Compose
+    runs-on: ubuntu-latest
+    needs: validate-manifests
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Créer les secrets Docker
+        run: |
+          mkdir -p secrets
+          echo "${{ secrets.MYSQL_ROOT_PASSWORD || 'bateau' }}" > secrets/mysql_root_password.txt
+          echo "${{ secrets.MYSQL_PASSWORD || 'bateau' }}" > secrets/mysql_password.txt
+
+      - name: Créer .env
+        run: |
+          cat > .env << EOF
+          MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE || 'wordpress_db' }}
+          MYSQL_USER=${{ secrets.MYSQL_USER || 'wordpress_user' }}
+          EOF
+
+      - name: Démarrer WordPress + MySQL
+        run: |
+          docker compose up -d
+          sleep 30
+
+      - name: Vérifier MySQL
+        run: |
+          docker compose exec -T mysql mysqladmin ping -h localhost -uroot -pbateau
+
+      - name: Vérifier WordPress
+        run: |
+          max_attempts=10
+          attempt=0
+          until curl -f http://localhost:8080 || [ $attempt -eq $max_attempts ]; do
+            echo "$((++attempt))/$max_attempts"
+            sleep 10
+          done
+
+          if [ $attempt -eq $max_attempts ]; then
+            echo "WordPress pas start"
+            docker compose logs
+            exit 1
+          fi
+
+      - name: Arrêter les services
+        if: always()
+        run: |
+          docker compose down -v
+
+  # =====================================================
+  # 3. GÉNÉRATION DES MANIFESTS KUBERNETES
+  # =====================================================
+  generate-manifests:
+    name: Génération des manifests Kubernetes
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Installer Kompose
+        run: |
+          curl -L https://github.com/kubernetes/kompose/releases/download/${{ env.KOMPOSE_VERSION }}/kompose-linux-amd64 -o kompose
+          chmod +x kompose
+          sudo mv kompose /usr/local/bin/
+
+      - name: Installer Kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+
+      - name: Créer les secrets pour Kompose
+        run: |
+          mkdir -p secrets
+          echo "${{ secrets.MYSQL_ROOT_PASSWORD || 'bateau' }}" > secrets/mysql_root_password.txt
+          echo "${{ secrets.MYSQL_PASSWORD || 'bateau' }}" > secrets/mysql_password.txt
+
+      - name: Générer le rendu
+        run: |
+          chmod +x generate-rendu.sh
+          ./generate-rendu.sh
+
+      - name: Upload sur FTP
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_PORT: ${{ secrets.FTP_PORT || '21' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lftp
+
+          lftp -c "
+            set ftp:ssl-allow yes;
+            set ssl:verify-certificate no;
+            open -u $FTP_USERNAME,$FTP_PASSWORD $FTP_SERVER;
+            cd RenduDevopsKube;
+            put MichaudMaelWordpress.zip;
+            bye
+          "
