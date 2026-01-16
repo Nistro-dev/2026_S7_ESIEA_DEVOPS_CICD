@@ -54,17 +54,21 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Build Docker image
-      run: docker-compose build
+      run: docker compose build
 
     - name: Start services
-      run: docker-compose up -d
+      run: docker compose up -d
 
     - name: Wait for service to be healthy
       run: |
         echo "Waiting for service to be healthy..."
-        timeout 60 bash -c 'until docker-compose ps | grep -q "healthy"; do sleep 2; done'
-        docker-compose ps
+        timeout 60 bash -c 'until docker compose ps | grep -q "healthy"; do sleep 2; done'
+        docker compose ps
+
+    - name: Show container logs
+      if: always()
+      run: docker compose logs
 
     - name: Stop services
       if: always()
-      run: docker-compose down -v
+      run: docker compose down -v
